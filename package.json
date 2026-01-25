@@ -8,10 +8,11 @@
     "omnifocus-mcp": "./cli.cjs"
   },
   "scripts": {
-    "build": "tsc && npm run copy-files && chmod 755 dist/server.js",
+    "build": "npx tsc && npm run copy-files && chmod 755 dist/server.js",
     "copy-files": "mkdir -p dist/utils/omnifocusScripts && cp src/utils/omnifocusScripts/*.js dist/utils/omnifocusScripts/",
     "start": "node dist/server.js",
-    "dev": "tsc -w"
+    "dev": "npx tsc -w",
+    "test:move": "node test/test-move-task.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.8.0",
