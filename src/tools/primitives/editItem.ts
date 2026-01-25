@@ -29,6 +29,9 @@ export interface EditItemParams {
   addTags?: string[];           // Tags to add to the task
   removeTags?: string[];        // Tags to remove from the task
   replaceTags?: string[];       // Tags to replace all existing tags with
+  newProjectId?: string;        // ID of project to move task to
+  newProjectName?: string;      // Name of project to move task to (fallback if ID not provided)
+  newParentTaskId?: string;     // ID of parent task to move task under (for nesting)
   
   // Project-specific fields
   newSequential?: boolean;      // Whether the project should be sequential
@@ -346,8 +349,70 @@ function generateAppleScript(params: EditItemParams): string {
 `;
       }
     }
+
+    // Move task to a different project or parent task
+    if (params.newProjectId || params.newProjectName || params.newParentTaskId) {
+      const projectId = params.newProjectId?.replace(/['"\\]/g, '\\$&') || '';
+      const projectName = params.newProjectName?.replace(/['"\\]/g, '\\$&') || '';
+      const parentTaskId = params.newParentTaskId?.replace(/['"\\]/g, '\\$&') || '';
+
+      script += `
+        -- Move task to new location
+        set destContainer to missing value
+`;
+
+      if (parentTaskId) {
+        // Move to a parent task (make it a subtask)
+        script += `
+        -- Find parent task by ID using whose clause
+        try
+          set destContainer to first flattened task whose id = "${parentTaskId}"
+        end try
+`;
+      } else if (projectId) {
+        // Move to a project by ID
+        script += `
+        -- Find project by ID using whose clause
+        try
+          set destContainer to first flattened project whose id = "${projectId}"
+        end try
+`;
+      } else if (projectName) {
+        // Move to a project by name
+        script += `
+        -- Find project by name
+        try
+          set destContainer to first flattened project whose name = "${projectName}"
+        end try
+`;
+      }
+
+      if (parentTaskId) {
+        // Moving to a parent task - use tasks of the task
+        script += `
+        if destContainer is not missing value then
+          -- Move the task to the parent task
+          move foundItem to end of tasks of destContainer
+          set end of changedProperties to "moved to parent task"
+        else
+          set end of changedProperties to "move failed (parent task not found)"
+        end if
+`;
+      } else {
+        // Moving to a project - use tasks of project directly
+        script += `
+        if destContainer is not missing value then
+          -- Move the task to the project
+          move foundItem to end of tasks of destContainer
+          set end of changedProperties to "moved to project"
+        else
+          set end of changedProperties to "move failed (project not found)"
+        end if
+`;
+      }
+    }
   }
-  
+
   // Project-specific updates
   if (itemType === 'project') {
     // Update sequential status
