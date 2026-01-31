@@ -1,7 +1,7 @@
 import { executeOmniFocusScript } from '../../utils/scriptExecution.js';
 
 export interface QueryOmnifocusParams {
-  entity: 'tasks' | 'projects' | 'folders';
+  entity: 'tasks' | 'projects' | 'folders' | 'tags';
   filters?: {
     projectId?: string;
     projectName?: string;
@@ -12,12 +12,17 @@ export interface QueryOmnifocusParams {
     dueWithin?: number;
     deferredUntil?: number;
     hasNote?: boolean;
+    // Tag-specific filters
+    active?: boolean;
+    parentTagId?: string;
+    name?: string;
   };
   fields?: string[];
   limit?: number;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
   includeCompleted?: boolean;
+  includeInactive?: boolean;
   summary?: boolean;
 }
 
@@ -66,7 +71,7 @@ export async function queryOmnifocus(params: QueryOmnifocusParams): Promise<Quer
 }
 
 function generateQueryScript(params: QueryOmnifocusParams): string {
-  const { entity, filters = {}, fields, limit, sortBy, sortOrder, includeCompleted = false, summary = false } = params;
+  const { entity, filters = {}, fields, limit, sortBy, sortOrder, includeCompleted = false, includeInactive = false, summary = false } = params;
   
   // Build the JXA script based on the entity type and filters
   return `(() => {
@@ -108,13 +113,15 @@ function generateQueryScript(params: QueryOmnifocusParams): string {
       // Get the appropriate collection based on entity type
       let items = [];
       const entityType = "${entity}";
-      
+
       if (entityType === "tasks") {
         items = flattenedTasks;
       } else if (entityType === "projects") {
         items = flattenedProjects;
       } else if (entityType === "folders") {
         items = flattenedFolders;
+      } else if (entityType === "tags") {
+        items = flattenedTags;
       }
       
       // Apply filters
@@ -122,13 +129,22 @@ function generateQueryScript(params: QueryOmnifocusParams): string {
         // Skip completed/dropped unless explicitly requested
         if (!${includeCompleted}) {
           if (entityType === "tasks") {
-            if (item.taskStatus === Task.Status.Completed || 
+            if (item.taskStatus === Task.Status.Completed ||
                 item.taskStatus === Task.Status.Dropped) {
               return false;
             }
           } else if (entityType === "projects") {
-            if (item.status === Project.Status.Done || 
+            if (item.status === Project.Status.Done ||
                 item.status === Project.Status.Dropped) {
+              return false;
+            }
+          }
+        }
+
+        // Skip inactive tags unless explicitly requested
+        if (!${includeInactive}) {
+          if (entityType === "tags") {
+            if (!item.active) {
               return false;
             }
           }
@@ -236,21 +252,45 @@ function generateFilterConditions(entity: string, filters: any): string {
   if (entity === 'projects') {
     if (filters.folderId) {
       conditions.push(`
-        if (!item.parentFolder || 
+        if (!item.parentFolder ||
             item.parentFolder.id.primaryKey !== "${filters.folderId}") {
           return false;
         }
       `);
     }
-    
+
     if (filters.status && filters.status.length > 0) {
-      const statusCondition = filters.status.map((status: string) => 
+      const statusCondition = filters.status.map((status: string) =>
         `projectStatusMap[item.status] === "${status}"`
       ).join(' || ');
       conditions.push(`if (!(${statusCondition})) return false;`);
     }
   }
-  
+
+  if (entity === 'tags') {
+    if (filters.parentTagId) {
+      conditions.push(`
+        if (!item.parent ||
+            item.parent.id.primaryKey !== "${filters.parentTagId}") {
+          return false;
+        }
+      `);
+    }
+
+    if (filters.name) {
+      conditions.push(`
+        const tagName = item.name.toLowerCase();
+        if (!tagName.includes("${filters.name.toLowerCase()}")) {
+          return false;
+        }
+      `);
+    }
+
+    if (filters.active !== undefined) {
+      conditions.push(`if (item.active !== ${filters.active}) return false;`);
+    }
+  }
+
   return conditions.join('\n');
 }
 
@@ -323,6 +363,19 @@ function generateFieldMapping(entity: string, fields?: string[]): string {
           path: item.container ? item.container.name + "/" + item.name : item.name
         };
       `;
+    } else if (entity === 'tags') {
+      return `
+        return {
+          id: item.id.primaryKey,
+          name: item.name || "",
+          active: item.active,
+          allowsNextAction: item.allowsNextAction,
+          parentTagId: item.parent ? item.parent.id.primaryKey : null,
+          parentTagName: item.parent ? item.parent.name : null,
+          availableTaskCount: item.availableTaskCount || 0,
+          remainingTaskCount: item.remainingTaskCount || 0
+        };
+      `;
     }
   }
   
@@ -383,6 +436,18 @@ function generateFieldMapping(entity: string, fields?: string[]): string {
       return `estimatedMinutes: item.estimatedMinutes || null`;
     } else if (field === 'note') {
       return `note: item.note || ""`;
+    } else if (field === 'active') {
+      return `active: item.active`;
+    } else if (field === 'allowsNextAction') {
+      return `allowsNextAction: item.allowsNextAction`;
+    } else if (field === 'parentTagId') {
+      return `parentTagId: item.parent ? item.parent.id.primaryKey : null`;
+    } else if (field === 'parentTagName') {
+      return `parentTagName: item.parent ? item.parent.name : null`;
+    } else if (field === 'availableTaskCount') {
+      return `availableTaskCount: item.availableTaskCount || 0`;
+    } else if (field === 'remainingTaskCount') {
+      return `remainingTaskCount: item.remainingTaskCount || 0`;
     } else {
       // Default: try to access the field directly
       return `${field}: item.${field} !== undefined ? item.${field} : null`;

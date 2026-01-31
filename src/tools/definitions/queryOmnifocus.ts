@@ -3,8 +3,8 @@ import { queryOmnifocus, QueryOmnifocusParams } from '../primitives/queryOmnifoc
 import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 
 export const schema = z.object({
-  entity: z.enum(['tasks', 'projects', 'folders']).describe("Type of entity to query. Choose 'tasks' for individual tasks, 'projects' for projects, or 'folders' for folder organization"),
-  
+  entity: z.enum(['tasks', 'projects', 'folders', 'tags']).describe("Type of entity to query. Choose 'tasks' for individual tasks, 'projects' for projects, 'folders' for folder organization, or 'tags' for tag list"),
+
   filters: z.object({
     projectId: z.string().optional().describe("Filter tasks by exact project ID (use when you know the specific project ID)"),
     projectName: z.string().optional().describe("Filter tasks by project name. CASE-INSENSITIVE PARTIAL MATCHING - 'review' matches 'Weekly Review', 'Review Documents', etc. Special value: 'inbox' returns inbox tasks"),
@@ -14,10 +14,14 @@ export const schema = z.object({
     flagged: z.boolean().optional().describe("Filter by flagged status. true = only flagged items, false = only unflagged items"),
     dueWithin: z.number().optional().describe("Returns items due from TODAY through N days in future. Example: 7 = items due within next week (today + 6 days)"),
     deferredUntil: z.number().optional().describe("Returns items CURRENTLY DEFERRED that will become available within N days. Example: 3 = items becoming available in next 3 days"),
-    hasNote: z.boolean().optional().describe("Filter by note presence. true = items with non-empty notes (whitespace ignored), false = items with no notes or only whitespace")
+    hasNote: z.boolean().optional().describe("Filter by note presence. true = items with non-empty notes (whitespace ignored), false = items with no notes or only whitespace"),
+    // Tag-specific filters
+    active: z.boolean().optional().describe("Filter tags by active status. true = only active tags, false = only inactive tags"),
+    parentTagId: z.string().optional().describe("Filter tags by parent tag ID. Returns only direct children of the specified tag"),
+    name: z.string().optional().describe("Filter tags by name. CASE-INSENSITIVE PARTIAL MATCHING")
   }).optional().describe("Optional filters to narrow results. ALL filters combine with AND logic (must match all). Within array filters (tags, status) OR logic applies"),
-  
-  fields: z.array(z.string()).optional().describe("Specific fields to return (reduces response size). TASK FIELDS: id, name, note, flagged, taskStatus, dueDate, deferDate, completionDate, estimatedMinutes, tagNames, tags, projectName, projectId, parentId, childIds, hasChildren, sequential, completedByChildren, inInbox, modificationDate (or modified), creationDate (or added). PROJECT FIELDS: id, name, status, note, folderName, folderID, sequential, dueDate, deferDate, effectiveDueDate, effectiveDeferDate, completedByChildren, containsSingletonActions, taskCount, tasks, modificationDate, creationDate. FOLDER FIELDS: id, name, path, parentFolderID, status, projectCount, projects, subfolders. NOTE: Date fields use 'added' and 'modified' in OmniFocus API"),
+
+  fields: z.array(z.string()).optional().describe("Specific fields to return (reduces response size). TASK FIELDS: id, name, note, flagged, taskStatus, dueDate, deferDate, completionDate, estimatedMinutes, tagNames, tags, projectName, projectId, parentId, childIds, hasChildren, sequential, completedByChildren, inInbox, modificationDate (or modified), creationDate (or added). PROJECT FIELDS: id, name, status, note, folderName, folderID, sequential, dueDate, deferDate, effectiveDueDate, effectiveDeferDate, completedByChildren, containsSingletonActions, taskCount, tasks, modificationDate, creationDate. FOLDER FIELDS: id, name, path, parentFolderID, status, projectCount, projects, subfolders. TAG FIELDS: id, name, active, allowsNextAction, parentTagId, parentTagName, availableTaskCount, remainingTaskCount. NOTE: Date fields use 'added' and 'modified' in OmniFocus API"),
   
   limit: z.number().optional().describe("Maximum number of items to return. Useful for large result sets. Default: no limit"),
   
@@ -26,7 +30,9 @@ export const schema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional().describe("Sort order. 'asc' = ascending (A-Z, old-new, small-large), 'desc' = descending (Z-A, new-old, large-small). Default: 'asc'"),
   
   includeCompleted: z.boolean().optional().describe("Include completed and dropped items. Default: false (active items only)"),
-  
+
+  includeInactive: z.boolean().optional().describe("Include inactive (hidden) tags. Default: false (active tags only). Only applies to entity: 'tags'"),
+
   summary: z.boolean().optional().describe("Return only count of matches, not full details. Efficient for statistics. Default: false")
 });
 
@@ -107,8 +113,11 @@ function formatQueryResults(items: any[], entity: string, filters?: any): string
     case 'folders':
       output += formatFolders(items);
       break;
+    case 'tags':
+      output += formatTags(items);
+      break;
   }
-  
+
   return output;
 }
 
@@ -123,6 +132,10 @@ function formatFilters(filters: any): string {
   if (filters.dueWithin) parts.push(`due within ${filters.dueWithin} days`);
   if (filters.deferredUntil) parts.push(`deferred becoming available within ${filters.deferredUntil} days`);
   if (filters.hasNote !== undefined) parts.push(`has note: ${filters.hasNote}`);
+  // Tag-specific filters
+  if (filters.active !== undefined) parts.push(`active: ${filters.active}`);
+  if (filters.parentTagId) parts.push(`parentTagId: "${filters.parentTagId}"`);
+  if (filters.name) parts.push(`name: "${filters.name}"`);
   return parts.join(', ');
 }
 
@@ -215,8 +228,45 @@ function formatFolders(folders: any[]): string {
   return folders.map(folder => {
     const projectCount = folder.projectCount !== undefined ? ` (${folder.projectCount} projects)` : '';
     const path = folder.path ? ` 📍 ${folder.path}` : '';
-    
+
     return `F: ${folder.name}${projectCount}${path}`;
+  }).join('\n');
+}
+
+function formatTags(tags: any[]): string {
+  return tags.map(tag => {
+    const parts = [];
+
+    // Tag name with hierarchy indicator
+    const parent = tag.parentTagName ? `${tag.parentTagName} > ` : '';
+    parts.push(`🏷️ ${parent}${tag.name}`);
+
+    // ID
+    if (tag.id) {
+      parts.push(`[${tag.id}]`);
+    }
+
+    // Status indicators
+    if (!tag.active) {
+      parts.push('(inactive)');
+    }
+    if (!tag.allowsNextAction) {
+      parts.push('(blocks next)');
+    }
+
+    // Task counts
+    const taskInfo = [];
+    if (tag.availableTaskCount !== undefined) {
+      taskInfo.push(`${tag.availableTaskCount} available`);
+    }
+    if (tag.remainingTaskCount !== undefined) {
+      taskInfo.push(`${tag.remainingTaskCount} remaining`);
+    }
+    if (taskInfo.length > 0) {
+      parts.push(`(${taskInfo.join(', ')})`);
+    }
+
+    return parts.join(' ');
   }).join('\n');
 }
 
