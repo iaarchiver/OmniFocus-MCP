@@ -7,6 +7,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as dumpDatabaseTool from './tools/definitions/dumpDatabase.js';
 import * as addOmniFocusTaskTool from './tools/definitions/addOmniFocusTask.js';
 import * as addProjectTool from './tools/definitions/addProject.js';
+import * as addTagTool from './tools/definitions/addTag.js';
 import * as removeItemTool from './tools/definitions/removeItem.js';
 import * as editItemTool from './tools/definitions/editItem.js';
 import * as batchAddItemsTool from './tools/definitions/batchAddItems.js';
@@ -44,15 +45,22 @@ server.tool(
 );
 
 server.tool(
+  "add_tag",
+  "Add a new tag to OmniFocus",
+  addTagTool.schema.shape,
+  addTagTool.handler
+);
+
+server.tool(
   "remove_item",
-  "Remove a task or project from OmniFocus",
+  "Remove a task, project, or tag from OmniFocus",
   removeItemTool.schema.shape,
   removeItemTool.handler
 );
 
 server.tool(
   "edit_item",
-  "Edit a task or project in OmniFocus",
+  "Edit a task, project, or tag in OmniFocus",
   editItemTool.schema.shape,
   editItemTool.handler
 );

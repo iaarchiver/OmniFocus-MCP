@@ -12,10 +12,10 @@ type ProjectStatus = 'active' | 'completed' | 'dropped' | 'onHold';
 
 // Interface for item edit parameters
 export interface EditItemParams {
-  id?: string;                  // ID of the task or project to edit
-  name?: string;                // Name of the task or project to edit (as fallback if ID not provided)
-  itemType: 'task' | 'project'; // Type of item to edit
-  
+  id?: string;                  // ID of the task, project, or tag to edit
+  name?: string;                // Name of the task, project, or tag to edit (as fallback if ID not provided)
+  itemType: 'task' | 'project' | 'tag'; // Type of item to edit
+
   // Common editable fields
   newName?: string;             // New name for the item
   newNote?: string;             // New note for the item
@@ -23,7 +23,7 @@ export interface EditItemParams {
   newDeferDate?: string;        // New defer date in ISO format (empty string to clear)
   newFlagged?: boolean;         // New flagged status (false to remove flag, true to add flag)
   newEstimatedMinutes?: number; // New estimated minutes
-  
+
   // Task-specific fields
   newStatus?: TaskStatus;       // New status for tasks (incomplete, completed, dropped)
   addTags?: string[];           // Tags to add to the task
@@ -32,11 +32,15 @@ export interface EditItemParams {
   newProjectId?: string;        // ID of project to move task to
   newProjectName?: string;      // Name of project to move task to (fallback if ID not provided)
   newParentTaskId?: string;     // ID of parent task to move task under (for nesting)
-  
+
   // Project-specific fields
   newSequential?: boolean;      // Whether the project should be sequential
   newFolderName?: string;       // New folder to move the project to
   newProjectStatus?: ProjectStatus; // New status for projects
+
+  // Tag-specific fields
+  newParentTagId?: string;      // ID of parent tag to move tag under
+  newParentTagName?: string;    // Name of parent tag to move tag under (fallback if ID not provided)
 }
 
 /**
@@ -107,11 +111,18 @@ function generateAppleScript(params: EditItemParams): string {
         end try
       end if
 `;
-    } else {
+    } else if (itemType === 'project') {
       script += `
       -- Try to find project by ID using whose clause
       try
         set foundItem to first flattened project whose id = "${id}"
+      end try
+`;
+    } else if (itemType === 'tag') {
+      script += `
+      -- Try to find tag by ID using whose clause
+      try
+        set foundItem to first flattened tag whose id = "${id}"
       end try
 `;
     }
@@ -133,11 +144,18 @@ function generateAppleScript(params: EditItemParams): string {
         end try
       end if
 `;
-    } else {
+    } else if (itemType === 'project') {
       script += `
       -- Find project by name using whose clause
       try
         set foundItem to first flattened project whose name = "${name}"
+      end try
+`;
+    } else if (itemType === 'tag') {
+      script += `
+      -- Find tag by name using whose clause
+      try
+        set foundItem to first flattened tag whose name = "${name}"
       end try
 `;
     }
@@ -158,12 +176,21 @@ function generateAppleScript(params: EditItemParams): string {
         end try
       end if
 `;
-    } else {
+    } else if (itemType === 'project') {
       script += `
       -- If ID search failed, try to find project by name as fallback
       if foundItem is missing value then
         try
           set foundItem to first flattened project whose name = "${name}"
+        end try
+      end if
+`;
+    } else if (itemType === 'tag') {
+      script += `
+      -- If ID search failed, try to find tag by name as fallback
+      if foundItem is missing value then
+        try
+          set foundItem to first flattened tag whose name = "${name}"
         end try
       end if
 `;
@@ -419,19 +446,59 @@ function generateAppleScript(params: EditItemParams): string {
         try
           set destFolder to first flattened folder where name = "${folderName}"
         end try
-        
+
         if destFolder is missing value then
           -- Create the folder if it doesn't exist
           set destFolder to make new folder with properties {name:"${folderName}"}
         end if
-        
+
         -- Move project to the folder
         move foundItem to destFolder
         set end of changedProperties to "folder"
 `;
     }
   }
-  
+
+  // Tag-specific updates
+  if (itemType === 'tag') {
+    // Move to a new parent tag
+    if (params.newParentTagId || params.newParentTagName) {
+      const parentTagId = params.newParentTagId?.replace(/['"\\]/g, '\\$&') || '';
+      const parentTagName = params.newParentTagName?.replace(/['"\\]/g, '\\$&') || '';
+
+      script += `
+        -- Move tag to new parent
+        set destParentTag to missing value
+`;
+
+      if (parentTagId) {
+        script += `
+        -- Find parent tag by ID
+        try
+          set destParentTag to first flattened tag whose id = "${parentTagId}"
+        end try
+`;
+      } else if (parentTagName) {
+        script += `
+        -- Find parent tag by name
+        try
+          set destParentTag to first flattened tag whose name = "${parentTagName}"
+        end try
+`;
+      }
+
+      script += `
+        if destParentTag is not missing value then
+          -- Move tag to the parent tag
+          move foundItem to end of tags of destParentTag
+          set end of changedProperties to "moved to parent tag"
+        else
+          set end of changedProperties to "move failed (parent tag not found)"
+        end if
+`;
+    }
+  }
+
   script += `
         -- Prepare the changed properties as a string
         set changedPropsText to ""

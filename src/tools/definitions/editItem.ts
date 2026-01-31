@@ -5,8 +5,8 @@ import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.j
 export const schema = z.object({
   id: z.string().optional().describe("The ID of the task or project to edit"),
   name: z.string().optional().describe("The name of the task or project to edit (as fallback if ID not provided)"),
-  itemType: z.enum(['task', 'project']).describe("Type of item to edit ('task' or 'project')"),
-  
+  itemType: z.enum(['task', 'project', 'tag']).describe("Type of item to edit ('task', 'project', or 'tag')"),
+
   // Common editable fields
   newName: z.string().optional().describe("New name for the item"),
   newNote: z.string().optional().describe("New note for the item"),
@@ -14,7 +14,7 @@ export const schema = z.object({
   newDeferDate: z.string().optional().describe("New defer date in ISO format (YYYY-MM-DD or full ISO date); set to empty string to clear"),
   newFlagged: z.boolean().optional().describe("Set flagged status (set to false for no flag, true for flag)"),
   newEstimatedMinutes: z.number().optional().describe("New estimated minutes"),
-  
+
   // Task-specific fields
   newStatus: z.enum(['incomplete', 'completed', 'dropped']).optional().describe("New status for tasks (incomplete, completed, dropped)"),
   addTags: z.array(z.string()).optional().describe("Tags to add to the task"),
@@ -23,11 +23,15 @@ export const schema = z.object({
   newProjectId: z.string().optional().describe("ID of the project to move the task to"),
   newProjectName: z.string().optional().describe("Name of the project to move the task to (used if newProjectId is not provided)"),
   newParentTaskId: z.string().optional().describe("ID of the parent task to move the task under (makes it a subtask)"),
-  
+
   // Project-specific fields
   newSequential: z.boolean().optional().describe("Whether the project should be sequential"),
   newFolderName: z.string().optional().describe("New folder to move the project to"),
-  newProjectStatus: z.enum(['active', 'completed', 'dropped', 'onHold']).optional().describe("New status for projects")
+  newProjectStatus: z.enum(['active', 'completed', 'dropped', 'onHold']).optional().describe("New status for projects"),
+
+  // Tag-specific fields
+  newParentTagId: z.string().optional().describe("ID of the parent tag to move the tag under"),
+  newParentTagName: z.string().optional().describe("Name of the parent tag to move the tag under (used if newParentTagId is not provided)")
 });
 
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
@@ -48,7 +52,7 @@ export async function handler(args: z.infer<typeof schema>, extra: RequestHandle
     
     if (result.success) {
       // Item was edited successfully
-      const itemTypeLabel = args.itemType === 'task' ? 'Task' : 'Project';
+      const itemTypeLabel = args.itemType === 'task' ? 'Task' : args.itemType === 'project' ? 'Project' : 'Tag';
       let changedText = '';
       
       if (result.changedProperties) {

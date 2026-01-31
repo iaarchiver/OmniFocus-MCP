@@ -4,9 +4,9 @@ const execAsync = promisify(exec);
 
 // Interface for item removal parameters
 export interface RemoveItemParams {
-  id?: string;          // ID of the task or project to remove
-  name?: string;        // Name of the task or project to remove (as fallback if ID not provided)
-  itemType: 'task' | 'project'; // Type of item to remove
+  id?: string;          // ID of the task, project, or tag to remove
+  name?: string;        // Name of the task, project, or tag to remove (as fallback if ID not provided)
+  itemType: 'task' | 'project' | 'tag'; // Type of item to remove
 }
 
 /**
@@ -48,11 +48,18 @@ function generateAppleScript(params: RemoveItemParams): string {
           end try
         end if
 `;
-    } else {
+    } else if (itemType === 'project') {
       script += `
         -- Try to find project by ID
         try
           set foundItem to first flattened project where id = "${id}"
+        end try
+`;
+    } else if (itemType === 'tag') {
+      script += `
+        -- Try to find tag by ID
+        try
+          set foundItem to first flattened tag where id = "${id}"
         end try
 `;
     }
@@ -74,11 +81,18 @@ function generateAppleScript(params: RemoveItemParams): string {
           end try
         end if
 `;
-    } else {
+    } else if (itemType === 'project') {
       script += `
         -- Find project by name
         try
           set foundItem to first flattened project where name = "${name}"
+        end try
+`;
+    } else if (itemType === 'tag') {
+      script += `
+        -- Find tag by name
+        try
+          set foundItem to first flattened tag where name = "${name}"
         end try
 `;
     }
@@ -99,12 +113,21 @@ function generateAppleScript(params: RemoveItemParams): string {
           end try
         end if
 `;
-    } else {
+    } else if (itemType === 'project') {
       script += `
         -- If ID search failed, try to find project by name as fallback
         if foundItem is missing value then
           try
             set foundItem to first flattened project where name = "${name}"
+          end try
+        end if
+`;
+    } else if (itemType === 'tag') {
+      script += `
+        -- If ID search failed, try to find tag by name as fallback
+        if foundItem is missing value then
+          try
+            set foundItem to first flattened tag where name = "${name}"
           end try
         end if
 `;
